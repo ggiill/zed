@@ -302,17 +302,26 @@ impl ProjectDiff {
         let Some(repo) = project.read(cx).git_store().read(cx).active_repository() else {
             return Task::ready(Err(anyhow!("No active repository")));
         };
-        let main_branch = repo.update(cx, |repo, _| repo.default_branch(true));
+        let default_branch_task = repo.update(cx, |repo, _| repo.default_branch(true));
+        let current_branch_task = repo.update(cx, |repo, _| repo.current_branch_name());
         window.spawn(cx, async move |cx| {
-            let main_branch = main_branch
-                .await??
-                .context("Could not determine default branch")?;
+            let base_ref = 'base: {
+                if let Ok(Ok(Some(branch_name))) = current_branch_task.await {
+                    let graphite_parent_task = cx.update(|_, cx| {
+                        repo.update(cx, |repo, _| repo.graphite_parent_branch(branch_name))
+                    })?;
+                    if let Ok(Ok(Some(parent))) = graphite_parent_task.await {
+                        break 'base parent;
+                    }
+                }
+                default_branch_task
+                    .await??
+                    .context("Could not determine default branch")?
+            };
 
             let branch_diff = cx.new_window_entity(|window, cx| {
                 branch_diff::BranchDiff::new(
-                    DiffBase::Merge {
-                        base_ref: main_branch,
-                    },
+                    DiffBase::Merge { base_ref },
                     project.clone(),
                     window,
                     cx,
@@ -2657,6 +2666,48 @@ mod tests {
                 )
             ])
         );
+    }
+
+    #[gpui::test]
+    async fn test_branch_diff_with_graphite_parent(cx: &mut TestAppContext) {
+        init_test(cx);
+
+        let fs = FakeFs::new(cx.executor());
+        fs.insert_tree(
+            path!("/project"),
+            json!({
+                ".git": {},
+                "a.txt": "C",
+            }),
+        )
+        .await;
+
+        fs.set_branch_name(Path::new(path!("/project/.git")), Some("feature"));
+        fs.set_graphite_parent_for_repo(
+            Path::new(path!("/project/.git")),
+            "feature",
+            "feature-a",
+        );
+
+        let project = Project::test(fs.clone(), [path!("/project").as_ref()], cx).await;
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
+        let diff = cx
+            .update(|window, cx| {
+                ProjectDiff::new_with_default_branch(project.clone(), workspace, window, cx)
+            })
+            .await
+            .unwrap();
+        cx.run_until_parked();
+
+        let base_ref = diff.read_with(cx, |diff, cx| {
+            let DiffBase::Merge { base_ref } = diff.diff_base(cx) else {
+                panic!("expected DiffBase::Merge");
+            };
+            base_ref.clone()
+        });
+        assert_eq!(base_ref, SharedString::from("feature-a"));
     }
 
     #[gpui::test]

@@ -5867,6 +5867,33 @@ impl Repository {
         })
     }
 
+    pub fn current_branch_name(
+        &mut self,
+    ) -> oneshot::Receiver<Result<Option<SharedString>>> {
+        self.send_job(None, move |repo, _| async move {
+            match repo {
+                RepositoryState::Local(LocalRepositoryState { backend, .. }) => {
+                    backend.current_branch_name().await
+                }
+                RepositoryState::Remote(_) => Ok(None),
+            }
+        })
+    }
+
+    pub fn graphite_parent_branch(
+        &mut self,
+        branch_name: SharedString,
+    ) -> oneshot::Receiver<Result<Option<SharedString>>> {
+        self.send_job(None, move |repo, _| async move {
+            match repo {
+                RepositoryState::Local(LocalRepositoryState { backend, .. }) => {
+                    backend.graphite_parent_branch(branch_name).await
+                }
+                RepositoryState::Remote(_) => Ok(None),
+            }
+        })
+    }
+
     pub fn diff_tree(
         &mut self,
         diff_type: DiffTreeType,
