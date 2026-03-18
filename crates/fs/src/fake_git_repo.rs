@@ -47,6 +47,8 @@ pub struct FakeGitRepositoryState {
     pub blames: HashMap<RepoPath, Blame>,
     pub current_branch_name: Option<String>,
     pub branches: HashSet<String>,
+    /// Maps branch names to their graphite parent branch names.
+    pub graphite_parent_branches: HashMap<String, String>,
     /// List of remotes, keys are names and values are URLs
     pub remotes: HashMap<String, String>,
     pub simulated_index_write_error_message: Option<String>,
@@ -66,6 +68,7 @@ impl FakeGitRepositoryState {
             blames: Default::default(),
             current_branch_name: Default::default(),
             branches: Default::default(),
+            graphite_parent_branches: Default::default(),
             simulated_index_write_error_message: Default::default(),
             simulated_create_worktree_error: Default::default(),
             refs: HashMap::from_iter([("HEAD".into(), "abc".into())]),
@@ -970,6 +973,24 @@ impl GitRepository for FakeGitRepository {
             }))
         }
         .boxed()
+    }
+
+    fn current_branch_name(&self) -> BoxFuture<'_, Result<Option<SharedString>>> {
+        self.with_state_async(false, |state| {
+            Ok(state.current_branch_name.clone().map(SharedString::from))
+        })
+    }
+
+    fn graphite_parent_branch(
+        &self,
+        branch_name: SharedString,
+    ) -> BoxFuture<'_, Result<Option<SharedString>>> {
+        self.with_state_async(false, move |state| {
+            Ok(state
+                .graphite_parent_branches
+                .get(branch_name.as_ref())
+                .map(|s| SharedString::from(s.clone())))
+        })
     }
 
     fn create_remote(&self, name: String, url: String) -> BoxFuture<'_, Result<()>> {

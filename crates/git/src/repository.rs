@@ -952,6 +952,16 @@ pub trait GitRepository: Send + Sync {
         include_remote_name: bool,
     ) -> BoxFuture<'_, Result<Option<SharedString>>>;
 
+    fn current_branch_name(&self) -> BoxFuture<'_, Result<Option<SharedString>>>;
+
+    fn graphite_parent_branch(
+        &self,
+        branch_name: SharedString,
+    ) -> BoxFuture<'_, Result<Option<SharedString>>> {
+        let _ = branch_name;
+        async move { Ok(None) }.boxed()
+    }
+
     /// Runs `git rev-list --parents` to get the commit graph structure.
     /// Returns commit SHAs and their parent SHAs for building the graph visualization.
     fn initial_graph_data(
@@ -2668,6 +2678,49 @@ impl GitRepository for RealGitRepository {
                 }
 
                 Ok(None)
+            })
+            .boxed()
+    }
+
+    fn current_branch_name(&self) -> BoxFuture<'_, Result<Option<SharedString>>> {
+        let git_binary = self.git_binary();
+        self.executor
+            .spawn(async move {
+                let git = git_binary?;
+                match git.run(&["symbolic-ref", "--short", "HEAD"]).await {
+                    Ok(name) => Ok(Some(SharedString::from(name))),
+                    Err(_) => Ok(None),
+                }
+            })
+            .boxed()
+    }
+
+    fn graphite_parent_branch(
+        &self,
+        _branch_name: SharedString,
+    ) -> BoxFuture<'_, Result<Option<SharedString>>> {
+        let working_directory = self.working_directory();
+        self.executor
+            .spawn(async move {
+                let working_directory = working_directory?;
+                let output = new_command("gt")
+                    .arg("parent")
+                    .current_dir(&working_directory)
+                    .output()
+                    .await;
+                match output {
+                    Ok(output) if output.status.success() => {
+                        let parent = String::from_utf8_lossy(&output.stdout)
+                            .trim()
+                            .to_owned();
+                        if parent.is_empty() {
+                            Ok(None)
+                        } else {
+                            Ok(Some(SharedString::from(parent)))
+                        }
+                    }
+                    _ => Ok(None),
+                }
             })
             .boxed()
     }

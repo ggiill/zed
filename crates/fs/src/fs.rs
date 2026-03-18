@@ -1929,6 +1929,20 @@ impl FakeFs {
         .unwrap();
     }
 
+    pub fn set_graphite_parent_for_repo(
+        &self,
+        dot_git: &Path,
+        branch: impl Into<String>,
+        parent: impl Into<String>,
+    ) {
+        self.with_git_state(dot_git, false, |state| {
+            state
+                .graphite_parent_branches
+                .insert(branch.into(), parent.into());
+        })
+        .unwrap();
+    }
+
     pub fn set_remote_for_repo(
         &self,
         dot_git: &Path,
